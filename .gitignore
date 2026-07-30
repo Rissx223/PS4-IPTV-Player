@@ -1,0 +1,15 @@
+# Build artifacts
+build/
+*.o
+*.elf
+*.oelf
+eboot.bin
+pkg.gp4
+*.pkg
+
+# Generated package metadata
+sce_sys/param.sfo
+
+# Editor / OS
+*.swp
+.DS_Store
