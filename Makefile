@@ -23,6 +23,21 @@ LIBS        := -lc -lkernel -lc++ \
 # Additional compile flags.
 EXTRAFLAGS  := -Wall -Wno-unused-function -O2 -Iinclude -D_BSD_SOURCE
 
+# ---------------------------------------------------------------------------
+# Optional software (FFmpeg) decoder backend for AV1 / VP9 / VVC.
+#
+#   make USE_FFMPEG=1 FFMPEG_DIR=/path/to/ffmpeg-ps4-prefix
+#
+# FFMPEG_DIR must point at a prefix containing include/ and lib/ with FFmpeg
+# built for the OpenOrbis PS4 target (see tools/build_ffmpeg.sh). When unset
+# the default build uses only the PS4 hardware decoder (libSceAvPlayer).
+# ---------------------------------------------------------------------------
+USE_FFMPEG  ?= 0
+ifeq ($(USE_FFMPEG),1)
+EXTRAFLAGS  += -DUSE_FFMPEG -I$(FFMPEG_DIR)/include
+LIBS        += -L$(FFMPEG_DIR)/lib -lavformat -lavcodec -lswscale -lswresample -lavutil
+endif
+
 # Asset and module directories.
 ASSETS      := $(shell find assets -type f)
 LIBMODULES  := $(wildcard sce_module/*)

@@ -47,6 +47,15 @@ public:
     int frameHeight() const { return m_height; }
     bool hasFrame()   const { return m_hasFrame; }
 
+    // True when the active stream is being decoded in software (FFmpeg).
+    bool usingSoftwareDecoder() const {
+#ifdef USE_FFMPEG
+        return m_useFfmpeg;
+#else
+        return false;
+#endif
+    }
+
 private:
     void nv12ToArgb(const uint8_t *luma, const uint8_t *chroma,
                     int w, int h, int pitch);
@@ -58,6 +67,18 @@ private:
     int                   m_width   = 0;
     int                   m_height  = 0;
     bool                  m_hasFrame = false;
+
+#ifdef USE_FFMPEG
+    // Optional software-decode backend (libavcodec/libavformat/libswscale).
+    // Enables codecs the PS4 hardware cannot decode (AV1/VP9/VVC) at the cost
+    // of CPU-bound, non-real-time performance. m_ff is an opaque FfCtx*.
+    bool  ffOpen(const std::string &url, StreamCodec codec);
+    bool  ffUpdate();
+    void  ffStop();
+    void *m_ff        = nullptr;
+    bool  m_useFfmpeg = false;
+    bool  m_ffPaused  = false;
+#endif
 };
 
 #endif // PS4_IPTV_PLAYER_H

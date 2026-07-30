@@ -58,9 +58,15 @@ bool VideoPlayer::open(const std::string &url, StreamCodec codec)
     m_hasFrame = false;
 
     if (!codec_is_supported(codec) && codec != CODEC_UNKNOWN) {
+#ifdef USE_FFMPEG
+        // No PS4 hardware path: fall back to the software (FFmpeg) decoder.
+        m_useFfmpeg = true;
+        return ffOpen(url, codec);
+#else
         m_state = State::Error;
         m_error = codec_support_note(codec);
         return false;
+#endif
     }
 
     SceAvPlayerInitData init;
@@ -104,6 +110,12 @@ bool VideoPlayer::open(const std::string &url, StreamCodec codec)
 
 bool VideoPlayer::update()
 {
+#ifdef USE_FFMPEG
+    if (m_useFfmpeg) {
+        if (m_ffPaused || m_state == State::Error) return false;
+        return ffUpdate();
+    }
+#endif
     if (!m_handle || m_state == State::Error)
         return false;
 
@@ -175,6 +187,13 @@ void VideoPlayer::nv12ToArgb(const uint8_t *luma, const uint8_t *chroma,
 
 void VideoPlayer::togglePause()
 {
+#ifdef USE_FFMPEG
+    if (m_useFfmpeg) {
+        m_ffPaused = !m_ffPaused;
+        m_state = m_ffPaused ? State::Paused : State::Playing;
+        return;
+    }
+#endif
     if (!m_handle) return;
     if (m_state == State::Paused) {
         sceAvPlayerResume(m_handle);
@@ -187,6 +206,13 @@ void VideoPlayer::togglePause()
 
 void VideoPlayer::stop()
 {
+#ifdef USE_FFMPEG
+    if (m_useFfmpeg || m_ff) {
+        ffStop();
+        m_useFfmpeg = false;
+        m_ffPaused  = false;
+    }
+#endif
     if (m_handle) {
         sceAvPlayerStop(m_handle);
         sceAvPlayerClose(m_handle);

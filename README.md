@@ -12,6 +12,18 @@ It lets you browse and play IPTV content from three kinds of sources:
 The UI is rendered with SDL2 and navigated entirely with the DualShock 4. Video
 is decoded by the PS4's hardware decoder via `libSceAvPlayer`.
 
+Additional features:
+
+- **PS4 system keyboard** (`SceImeDialog`) for text entry, with the on-screen
+  drawn keyboard kept as an automatic fallback.
+- **Favorites** — mark channels with ▢ and browse them in a Favorites row that
+  persists under `/data`.
+- **Search** — press Options in the browser to filter channels by name.
+- **EPG (now / next)** — best-effort program info for Xtream live channels,
+  shown in the player overlay.
+- **Optional FFmpeg software decoder** — a build-time backend that enables
+  AV1 / VP9 / VVC decoding (see below).
+
 ![app icon](sce_sys/icon0.png)
 
 ## Codec support
@@ -28,14 +40,39 @@ accurate capability information instead of failing silently:
 |-------|--------------------|-----------------------------------------|
 | H.264 | ✅ Hardware        | AVC via `libSceAvPlayer` / Videodec2    |
 | H.265 | ✅ Hardware        | HEVC via `libSceAvPlayer` / Videodec2   |
-| AV1   | ❌ Not supported   | No hardware decoder on PS4              |
-| VP9   | ❌ Not supported   | No hardware decoder on PS4              |
-| VVC   | ❌ Not supported   | No hardware decoder on PS4              |
+| AV1   | ⚠️ FFmpeg only     | Software decode (`USE_FFMPEG=1`), not real time |
+| VP9   | ⚠️ FFmpeg only     | Software decode (`USE_FFMPEG=1`), not real time |
+| VVC   | ⚠️ FFmpeg only     | Software decode (`USE_FFMPEG=1`), not real time |
 
 Channels are tagged with a codec badge in the browser. Selecting a channel
 whose codec is unsupported shows a clear message rather than a black screen. The
-codec layer is pluggable, so if a future decode path becomes available it can be
-wired in without touching the rest of the app.
+codec layer is pluggable: when the app is built **without** FFmpeg (the
+default), AV1/VP9/VVC are detected but reported as unsupported; when built with
+FFmpeg they are routed to the software decoder.
+
+### Optional FFmpeg software decoder (AV1 / VP9 / VVC)
+
+`libSceAvPlayer` remains the primary path and is always used for H.264/H.265.
+For codecs the PS4 hardware cannot decode, an **optional** software backend
+(`source/ffmpeg_player.cpp`, guarded by `USE_FFMPEG`) decodes with
+libavcodec/libavformat and colour-converts via libswscale.
+
+> ⚠️ This is CPU-bound and is **not** expected to sustain real-time HD playback
+> on PS4 hardware. It exists so those codecs are decodable at all. FFmpeg has no
+> official PS4 target, so the libraries must be cross-compiled first.
+
+```sh
+# 1. Cross-compile FFmpeg for the OpenOrbis target (best-effort; expect to
+#    iterate on configure flags):
+git clone --depth=1 -b n6.1 https://github.com/FFmpeg/FFmpeg.git ffmpeg
+tools/build_ffmpeg.sh ffmpeg ./third_party/ffmpeg-ps4
+
+# 2. Build the app against it:
+make USE_FFMPEG=1 FFMPEG_DIR=$(pwd)/third_party/ffmpeg-ps4
+```
+
+The default `make` (no `USE_FFMPEG`) does not require FFmpeg and links only the
+hardware path.
 
 ## Building
 
@@ -71,10 +108,13 @@ python3 tools/gen_assets.py
 | D-pad / stick | Navigate                                           |
 | ✕ Cross       | Select / confirm / play / pause                    |
 | ◯ Circle      | Back / stop playback / exit (from home)            |
-| ▢ Square      | Edit source (home) / backspace (keyboard)          |
+| ▢ Square      | Edit source (home) / favorite (browser) / backspace |
 | △ Triangle    | Delete source (home) / toggle overlay (player)     |
 | L1 / R1       | Page up / down in the channel list                 |
-| Options       | Confirm text entry                                 |
+| Options       | Search (browser) / confirm text entry (keyboard)  |
+
+Text fields open the **PS4 system keyboard** when available and fall back to the
+on-screen drawn keyboard otherwise.
 
 ## Project layout
 
@@ -92,8 +132,11 @@ include/            Public headers
   player.h          Video playback + NV12->ARGB conversion
   text.h            FreeType text rendering onto SDL
   keyboard.h        On-screen keyboard (D-pad navigable)
+  syskeyboard.h     PS4 system keyboard (SceImeDialog) with fallback
   app.h / input.h   App state machine and input mapping
 source/             Implementations
+  ffmpeg_player.cpp Optional software decoder (USE_FFMPEG)
+tools/build_ffmpeg.sh  Cross-compile FFmpeg for the OpenOrbis target
 assets/             Fonts and UI images bundled into the package
 sce_sys/            icon0.png and packaging metadata
 tools/gen_assets.py Icon / image generator
@@ -118,6 +161,9 @@ tools/gen_assets.py Icon / image generator
 - Remote channel logos are not downloaded yet; a placeholder thumbnail is shown.
 - Software NV12→ARGB conversion at 1080p is CPU intensive; this is a reference
   implementation prioritising clarity.
+- The FFmpeg backend is a best-effort integration boundary: AV1/VP9/VVC decode
+  in software and are not expected to be real time on PS4.
+- The app has not been verified on physical PS4 hardware.
 
 ## Credits / licenses
 

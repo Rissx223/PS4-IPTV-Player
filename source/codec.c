@@ -16,13 +16,24 @@ const char *codec_name(StreamCodec c)
 
 int codec_is_supported(StreamCodec c)
 {
-    return (c == CODEC_H264 || c == CODEC_H265);
+    if (c == CODEC_H264 || c == CODEC_H265)
+        return 1;
+#ifdef USE_FFMPEG
+    /* Software (FFmpeg) backend can decode these, albeit not in real time. */
+    if (c == CODEC_AV1 || c == CODEC_VP9 || c == CODEC_VVC)
+        return 1;
+#endif
+    return 0;
 }
 
 CodecDecodePath codec_decode_path(StreamCodec c)
 {
     if (c == CODEC_H264 || c == CODEC_H265)
         return CODEC_PATH_HARDWARE;
+#ifdef USE_FFMPEG
+    if (c == CODEC_AV1 || c == CODEC_VP9 || c == CODEC_VVC)
+        return CODEC_PATH_SOFTWARE;
+#endif
     return CODEC_PATH_NONE;
 }
 
@@ -31,9 +42,15 @@ const char *codec_support_note(StreamCodec c)
     switch (c) {
         case CODEC_H264: return "Hardware decoded (AVC).";
         case CODEC_H265: return "Hardware decoded (HEVC).";
+#ifdef USE_FFMPEG
+        case CODEC_AV1:  return "AV1 decoded in software (FFmpeg) - may not be real time.";
+        case CODEC_VP9:  return "VP9 decoded in software (FFmpeg) - may not be real time.";
+        case CODEC_VVC:  return "VVC/H.266 decoded in software (FFmpeg) - may not be real time.";
+#else
         case CODEC_AV1:  return "AV1 has no PS4 hardware decoder - not supported.";
         case CODEC_VP9:  return "VP9 has no PS4 hardware decoder - not supported.";
         case CODEC_VVC:  return "VVC/H.266 has no PS4 hardware decoder - not supported.";
+#endif
         default:         return "Codec could not be determined.";
     }
 }
