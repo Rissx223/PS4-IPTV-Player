@@ -5,8 +5,9 @@
 #include <string>
 #include <sstream>
 
-#define CONFIG_DIR  "/data/PS4-IPTV-Player"
-#define CONFIG_FILE CONFIG_DIR "/sources.tsv"
+#define CONFIG_DIR   "/data/PS4-IPTV-Player"
+#define CONFIG_FILE  CONFIG_DIR "/sources.tsv"
+#define FAVES_FILE   CONFIG_DIR "/favorites.txt"
 
 int config_ensure_dir(void)
 {
@@ -109,6 +110,42 @@ bool config_save_sources(const std::vector<SourceProfile> &sources)
         line += escape(p.url);                            line += '\t';
         line += "";                                       line += '\n';
         fwrite(line.data(), 1, line.size(), f);
+    }
+    fclose(f);
+    return true;
+}
+
+std::set<std::string> config_load_favorites(void)
+{
+    std::set<std::string> result;
+    FILE *f = fopen(FAVES_FILE, "rb");
+    if (!f) return result;
+
+    std::string content;
+    char buf[4096];
+    size_t rd;
+    while ((rd = fread(buf, 1, sizeof(buf), f)) > 0)
+        content.append(buf, rd);
+    fclose(f);
+
+    std::istringstream iss(content);
+    std::string line;
+    while (std::getline(iss, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (!line.empty()) result.insert(line);
+    }
+    return result;
+}
+
+bool config_save_favorites(const std::set<std::string> &favorites)
+{
+    if (config_ensure_dir() != 0)
+        return false;
+    FILE *f = fopen(FAVES_FILE, "wb");
+    if (!f) return false;
+    for (const auto &u : favorites) {
+        fwrite(u.data(), 1, u.size(), f);
+        fputc('\n', f);
     }
     fclose(f);
     return true;

@@ -1,9 +1,15 @@
 #include "app.h"
 
 #include <SDL2/SDL_image.h>
+#include <cctype>
 
 #include "config.h"
 #include "playlist.h"
+#include "syskeyboard.h"
+#include "xtream.h"
+
+// Sentinel field id used to route keyboard input to the search box.
+static const int kSearchFieldId = -100;
 
 namespace {
 
@@ -75,8 +81,11 @@ bool App::init(SDL_Renderer *renderer, SDL_Window *window, int width, int height
 
     VideoPlayer::globalInit();
 
+    m_useSysKeyboard = sys_keyboard_init();
+
     config_ensure_dir();
-    m_sources = config_load_sources();
+    m_sources   = config_load_sources();
+    m_favorites = config_load_favorites();
 
     m_screen = Screen::Home;
     return true;
@@ -145,10 +154,15 @@ void App::handleAction(Action a)
         m_keyboard.handle(a, done, accepted);
         if (done) {
             m_keyboardActive = false;
-            if (accepted && m_keyboardField >= 0) {
-                auto fields = buildFields(m_draft);
-                if (m_keyboardField < (int)fields.size() && fields[m_keyboardField].value)
-                    *fields[m_keyboardField].value = m_keyboard.text();
+            if (accepted) {
+                if (m_keyboardField == kSearchFieldId) {
+                    m_searchQuery = m_keyboard.text();
+                    rebuildView();
+                } else if (m_keyboardField >= 0) {
+                    auto fields = buildFields(m_draft);
+                    if (m_keyboardField < (int)fields.size() && fields[m_keyboardField].value)
+                        *fields[m_keyboardField].value = m_keyboard.text();
+                }
             }
         }
         return;
@@ -219,11 +233,72 @@ void App::loadSource(int index)
         showMessage("Load failed", res.message);
         return;
     }
+    m_currentSource = index;
+
+    // Re-apply saved favorites to the freshly loaded channels.
+    for (auto &ch : m_playlist.channels)
+        ch.favorite = (m_favorites.count(ch.url) > 0);
+
+    m_searchQuery.clear();
+    rebuildView();
+
     m_catSel = 0;
     m_chanSel = 0;
     m_chanScroll = 0;
     m_focusChannels = false;
     m_screen = Screen::Browse;
+}
+
+// Compose the browse view: optional Favorites and Search categories first,
+// then the playlist's real categories.
+void App::rebuildView()
+{
+    m_viewCats.clear();
+
+    Category fav;
+    fav.id = "__fav__";
+    fav.name = "\xE2\x98\x85 Favorites"; // ★ Favorites
+    for (int i = 0; i < (int)m_playlist.channels.size(); i++)
+        if (m_playlist.channels[i].favorite)
+            fav.channelIndices.push_back(i);
+    if (!fav.channelIndices.empty())
+        m_viewCats.push_back(std::move(fav));
+
+    if (!m_searchQuery.empty()) {
+        std::string q = m_searchQuery;
+        for (auto &c : q) c = (char)tolower((unsigned char)c);
+        Category sr;
+        sr.id = "__search__";
+        sr.name = "Search: " + m_searchQuery;
+        for (int i = 0; i < (int)m_playlist.channels.size(); i++) {
+            std::string n = m_playlist.channels[i].name;
+            for (auto &c : n) c = (char)tolower((unsigned char)c);
+            if (n.find(q) != std::string::npos)
+                sr.channelIndices.push_back(i);
+        }
+        m_viewCats.push_back(std::move(sr));
+    }
+
+    for (const auto &c : m_playlist.categories)
+        m_viewCats.push_back(c);
+}
+
+void App::toggleFavorite(int channelIndex)
+{
+    if (channelIndex < 0 || channelIndex >= (int)m_playlist.channels.size())
+        return;
+    Channel &ch = m_playlist.channels[channelIndex];
+    ch.favorite = !ch.favorite;
+    if (ch.favorite) m_favorites.insert(ch.url);
+    else             m_favorites.erase(ch.url);
+    config_save_favorites(m_favorites);
+    rebuildView();
+    if (m_catSel >= (int)m_viewCats.size()) m_catSel = 0;
+}
+
+void App::beginSearch()
+{
+    promptText("Search channels", m_searchQuery, false, kSearchFieldId);
 }
 
 // ===========================================================================
@@ -281,10 +356,32 @@ void App::enterFormFieldEditor()
     auto fields = buildFields(m_draft);
     if (m_formSel >= (int)fields.size() || !fields[m_formSel].value)
         return;
-    m_keyboardField = m_formSel;
+    promptText(fields[m_formSel].label, *fields[m_formSel].value,
+               fields[m_formSel].password, m_formSel);
+}
+
+// Prefer the PS4 system keyboard (modal/blocking); fall back to the drawn one.
+void App::promptText(const std::string &title, const std::string &initial,
+                     bool password, int fieldId)
+{
+    if (m_useSysKeyboard && sys_keyboard_available()) {
+        std::string result;
+        if (sys_keyboard_prompt(title, initial, password, result)) {
+            if (fieldId == kSearchFieldId) {
+                m_searchQuery = result;
+                rebuildView();
+            } else if (fieldId >= 0) {
+                auto fields = buildFields(m_draft);
+                if (fieldId < (int)fields.size() && fields[fieldId].value)
+                    *fields[fieldId].value = result;
+            }
+        }
+        return;
+    }
+    // Fallback: on-screen drawn keyboard.
+    m_keyboardField = fieldId;
     m_keyboardActive = true;
-    m_keyboard.begin(fields[m_formSel].label, *fields[m_formSel].value,
-                     fields[m_formSel].password);
+    m_keyboard.begin(title, initial, password);
 }
 
 void App::saveDraftSource()
@@ -307,24 +404,30 @@ void App::saveDraftSource()
 // ===========================================================================
 void App::handleBrowse(Action a)
 {
-    if (m_playlist.categories.empty()) {
+    // Search is available from anywhere in the browser via Options.
+    if (a == Action::Menu) { beginSearch(); return; }
+
+    if (m_viewCats.empty()) {
         if (a == Action::Back) m_screen = Screen::Home;
         return;
     }
+    if (m_catSel >= (int)m_viewCats.size()) m_catSel = 0;
 
     if (!m_focusChannels) {
+        int nc = (int)m_viewCats.size();
         switch (a) {
-            case Action::Up:    m_catSel = (m_catSel + (int)m_playlist.categories.size() - 1) % (int)m_playlist.categories.size(); m_chanSel = 0; m_chanScroll = 0; break;
-            case Action::Down:  m_catSel = (m_catSel + 1) % (int)m_playlist.categories.size(); m_chanSel = 0; m_chanScroll = 0; break;
+            case Action::Up:    m_catSel = (m_catSel + nc - 1) % nc; m_chanSel = 0; m_chanScroll = 0; break;
+            case Action::Down:  m_catSel = (m_catSel + 1) % nc; m_chanSel = 0; m_chanScroll = 0; break;
             case Action::Right:
             case Action::Confirm: m_focusChannels = true; break;
             case Action::Back:  m_screen = Screen::Home; break;
             default: break;
         }
     } else {
-        const Category &cat = m_playlist.categories[m_catSel];
+        const Category &cat = m_viewCats[m_catSel];
         int cnt = (int)cat.channelIndices.size();
         if (cnt == 0) { m_focusChannels = false; return; }
+        if (m_chanSel >= cnt) m_chanSel = cnt - 1;
         switch (a) {
             case Action::Up:    m_chanSel = (m_chanSel + cnt - 1) % cnt; break;
             case Action::Down:  m_chanSel = (m_chanSel + 1) % cnt; break;
@@ -332,6 +435,9 @@ void App::handleBrowse(Action a)
             case Action::PageDown: m_chanSel = (m_chanSel + 8 >= cnt) ? cnt - 1 : m_chanSel + 8; break;
             case Action::Left:  m_focusChannels = false; break;
             case Action::Back:  m_focusChannels = false; break;
+            case Action::Action1: // Square = toggle favorite
+                toggleFavorite(cat.channelIndices[m_chanSel]);
+                break;
             case Action::Confirm:
                 startPlayback(cat.channelIndices[m_chanSel]);
                 break;
@@ -347,11 +453,23 @@ void App::startPlayback(int channelIndex)
 {
     if (channelIndex < 0 || channelIndex >= (int)m_playlist.channels.size())
         return;
-    const Channel &ch = m_playlist.channels[channelIndex];
+    Channel &ch = m_playlist.channels[channelIndex];
 
     m_nowPlaying = ch.name;
     m_nowCodec   = ch.codec;
     m_showOverlay = true;
+
+    // Best-effort EPG (now/next) for Xtream live channels.
+    m_epgNow.clear();
+    m_epgNext.clear();
+    if (m_playlist.kind == SourceKind::Xtream &&
+        m_currentSource >= 0 && m_currentSource < (int)m_sources.size() &&
+        ch.url.find("/live/") != std::string::npos) {
+        if (xtream_short_epg(m_sources[m_currentSource], ch.id, m_epgNow, m_epgNext)) {
+            ch.epgNow = m_epgNow;
+            ch.epgNext = m_epgNext;
+        }
+    }
 
     if (!codec_is_supported(ch.codec) && ch.codec != CODEC_UNKNOWN) {
         showMessage(std::string("Unsupported codec: ") + codec_name(ch.codec),

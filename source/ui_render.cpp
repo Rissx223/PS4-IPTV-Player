@@ -170,8 +170,10 @@ void App::renderBrowse()
 {
     renderTopBar(m_playlist.title);
 
-    if (m_playlist.categories.empty()) {
+    const std::vector<Category> &cats = viewCats();
+    if (cats.empty()) {
         m_font.draw(m_r, 120, 300, "No channels in this source.", kDim);
+        m_fontSmall.draw(m_r, 60, m_h - 50, "Options: search   O: back", kDim);
         return;
     }
 
@@ -185,10 +187,10 @@ void App::renderBrowse()
     if (m_catSel >= visibleCats) catStart = m_catSel - visibleCats + 1;
 
     int yy = catY + 48;
-    for (int i = catStart; i < (int)m_playlist.categories.size() && i < catStart + visibleCats; i++) {
+    for (int i = catStart; i < (int)cats.size() && i < catStart + visibleCats; i++) {
         bool sel = (i == m_catSel);
         if (sel) fillRect(catX + 8, yy - 4, catW - 16, 52, m_focusChannels ? kPanel2 : kSel);
-        const Category &c = m_playlist.categories[i];
+        const Category &c = cats[i];
         std::string label = c.name + "  (" + std::to_string(c.channelIndices.size()) + ")";
         m_font.drawClipped(m_r, catX + 24, yy + 6, label,
                            (sel && !m_focusChannels) ? kDark : kWhite, catW - 60);
@@ -200,7 +202,7 @@ void App::renderBrowse()
     const int chW = m_w - chX - 60;
     fillRect(chX, chY, chW, m_h - chY - 60, kPanel);
 
-    const Category &cat = m_playlist.categories[m_catSel];
+    const Category &cat = cats[m_catSel];
     m_fontSmall.draw(m_r, chX + 20, chY + 12, "CHANNELS", kDim);
 
     int visibleCh = (m_h - chY - 120) / 72;
@@ -220,7 +222,9 @@ void App::renderBrowse()
             SDL_RenderCopy(m_r, m_texPlaceholder, nullptr, &tr);
         }
         Color tc = (sel && m_focusChannels) ? kDark : kWhite;
-        m_font.drawClipped(m_r, chX + 132, cy + 4, ch.name, tc, chW - 300);
+        std::string name = ch.name;
+        if (ch.favorite) name = "\xE2\x98\x85 " + name;  // ★
+        m_font.drawClipped(m_r, chX + 132, cy + 4, name, tc, chW - 300);
 
         // Codec badge
         Color badge = codec_is_supported(ch.codec) ? kGreen :
@@ -234,7 +238,7 @@ void App::renderBrowse()
     }
 
     m_fontSmall.draw(m_r, 60, m_h - 50,
-        "D-pad: navigate   X: play   L1/R1: page   O: back", kDim);
+        "D-pad: navigate   X: play   []: favorite   Options: search   L1/R1: page   O: back", kDim);
 }
 
 void App::renderPlayer()
@@ -256,8 +260,20 @@ void App::renderPlayer()
     }
 
     if (m_showOverlay) {
-        fillRect(0, m_h - 130, m_w, 130, { 0, 0, 0, 170 });
-        m_fontBig.drawClipped(m_r, 60, m_h - 118, m_nowPlaying, kWhite, m_w - 120);
+        bool hasEpg = !m_epgNow.empty() || !m_epgNext.empty();
+        int barH = hasEpg ? 190 : 130;
+        fillRect(0, m_h - barH, m_w, barH, { 0, 0, 0, 175 });
+        m_fontBig.drawClipped(m_r, 60, m_h - barH + 14, m_nowPlaying, kWhite, m_w - 120);
+
+        int ey = m_h - barH + 66;
+        if (hasEpg) {
+            if (!m_epgNow.empty())
+                m_font.drawClipped(m_r, 60, ey, "Now:  " + m_epgNow, kAccent, m_w - 120);
+            if (!m_epgNext.empty())
+                m_font.drawClipped(m_r, 60, ey + 36, "Next: " + m_epgNext, kDim, m_w - 120);
+            ey += 76;
+        }
+
         std::string state;
         switch (m_player.state()) {
             case VideoPlayer::State::Playing: state = "Playing"; break;
@@ -268,7 +284,7 @@ void App::renderPlayer()
         }
         std::string info = codec_name(m_nowCodec) + std::string("  |  ") + state +
                            "  |  X: pause   /\\: overlay   O: stop";
-        m_font.draw(m_r, 60, m_h - 62, info, kDim);
+        m_font.draw(m_r, 60, ey, info, kDim);
     }
 }
 

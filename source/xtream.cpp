@@ -34,6 +34,26 @@ std::string urlEncode(const std::string &s)
     return out;
 }
 
+std::string base64Decode(const std::string &in)
+{
+    static const std::string chars =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    int val = 0, bits = -8;
+    std::string out;
+    for (unsigned char c : in) {
+        if (c == '=' || c == '\n' || c == '\r' || c == ' ') continue;
+        size_t idx = chars.find((char)c);
+        if (idx == std::string::npos) continue;
+        val = (val << 6) + (int)idx;
+        bits += 6;
+        if (bits >= 0) {
+            out.push_back((char)((val >> bits) & 0xFF));
+            bits -= 8;
+        }
+    }
+    return out;
+}
+
 std::string apiUrl(const SourceProfile &p, const std::string &action)
 {
     std::string url = normalizeHost(p.host);
@@ -151,6 +171,27 @@ XtreamResult xtream_authenticate(const SourceProfile &profile, std::string &stat
         r.message = authStatus.empty() ? "Authentication failed" : authStatus;
     }
     return r;
+}
+
+bool xtream_short_epg(const SourceProfile &profile, const std::string &streamId,
+                      std::string &now, std::string &next)
+{
+    if (streamId.empty()) return false;
+
+    std::string url = apiUrl(profile, "get_short_epg") +
+                      "&stream_id=" + streamId + "&limit=2";
+    JsonValue v;
+    std::string err;
+    if (!getJson(url, v, err)) return false;
+
+    const JsonValue &listings = v["epg_listings"];
+    if (!listings.isArray() || listings.size() == 0) return false;
+
+    if (listings.size() >= 1)
+        now  = base64Decode(listings.at(0)["title"].asString());
+    if (listings.size() >= 2)
+        next = base64Decode(listings.at(1)["title"].asString());
+    return !now.empty() || !next.empty();
 }
 
 XtreamResult xtream_load(const SourceProfile &profile, Playlist &out)

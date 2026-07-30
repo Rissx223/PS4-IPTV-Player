@@ -17,6 +17,7 @@ LIBS        := -lc -lkernel -lc++ \
                -lScePad -lSceSysmodule -lSceFreeType \
                -lSceNet -lSceSsl -lSceHttp \
                -lSceAvPlayer \
+               -lSceCommonDialog -lSceImeDialog \
                -lSDL2 -lSDL2_image
 
 # Additional compile flags.

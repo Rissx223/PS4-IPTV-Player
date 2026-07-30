@@ -7,6 +7,7 @@
 #include <SDL2/SDL.h>
 #include <string>
 #include <vector>
+#include <set>
 
 #include "model.h"
 #include "input.h"
@@ -59,6 +60,15 @@ private:
     void showMessage(const std::string &title, const std::string &body);
     void startPlayback(int channelIndex);
 
+    // Text entry: prefers the PS4 system keyboard, falls back to the drawn one.
+    void promptText(const std::string &title, const std::string &initial,
+                    bool password, int fieldId);
+
+    void rebuildView();                 // build Favorites/Search + real categories
+    void toggleFavorite(int channelIndex);
+    void beginSearch();
+    const std::vector<Category> &viewCats() const { return m_viewCats; }
+
     SDL_Texture *loadImage(const char *path);
     void fillRect(int x, int y, int w, int h, Color c);
     void frameRect(int x, int y, int w, int h, Color c);
@@ -89,6 +99,15 @@ private:
     std::vector<SourceProfile> m_sources;
     int                        m_homeSel = 0;   // selected row on home
     Playlist                   m_playlist;
+    int                        m_currentSource = -1;
+
+    // Favorites + search + composed view
+    std::set<std::string>      m_favorites;     // by playback URL
+    std::string                m_searchQuery;
+    std::vector<Category>      m_viewCats;      // Favorites/Search + real cats
+
+    // Text-entry routing
+    bool m_useSysKeyboard = false;
 
     // Browse
     int m_catSel = 0;
@@ -119,6 +138,8 @@ private:
     std::string  m_nowPlaying;
     StreamCodec  m_nowCodec = CODEC_UNKNOWN;
     bool         m_showOverlay = true;
+    std::string  m_epgNow;
+    std::string  m_epgNext;
 };
 
 #endif // PS4_IPTV_APP_H

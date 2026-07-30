@@ -16,6 +16,9 @@ struct Channel {
     std::string logoUrl;     // channel logo / poster (may be empty)
     std::string group;       // category / group-title
     StreamCodec codec = CODEC_UNKNOWN;
+    bool        favorite = false;
+    std::string epgNow;      // best-effort "now" programme title (Xtream)
+    std::string epgNext;     // best-effort "next" programme title (Xtream)
 };
 
 // A named grouping of channels (Xtream category or M3U group-title).

@@ -24,4 +24,9 @@ XtreamResult xtream_authenticate(const SourceProfile &profile, std::string &stat
 // Authenticate and load the full playlist (live + VOD) into `out`.
 XtreamResult xtream_load(const SourceProfile &profile, Playlist &out);
 
+// Best-effort "now / next" EPG for a live stream. Titles are base64-decoded.
+// Returns false on any error; `now` / `next` are left untouched then.
+bool xtream_short_epg(const SourceProfile &profile, const std::string &streamId,
+                      std::string &now, std::string &next);
+
 #endif // PS4_IPTV_XTREAM_H
